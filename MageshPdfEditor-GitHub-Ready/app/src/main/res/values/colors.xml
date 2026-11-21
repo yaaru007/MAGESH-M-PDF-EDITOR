@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="obsidian_bg">#0B0F14</color>
+    <color name="slate_surface">#131922</color>
+    <color name="graphite_card">#1B2330</color>
+    <color name="graphite_border">#2B3545</color>
+    <color name="emerald_accent">#10B981</color>
+    <color name="emerald_dark">#059669</color>
+    <color name="amber_signal">#F59E0B</color>
+    <color name="crimson_redact">#EF4444</color>
+    <color name="text_primary">#E6EDF3</color>
+    <color name="text_secondary">#8B949E</color>
+</resources>

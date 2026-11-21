@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MAGESH M PDF EDITOR</string>
+    <string name="open_pdf">Open PDF</string>
+    <string name="no_pdf_loaded">Open any PDF or use Quick Tools below</string>
+    <string name="search_tools_hint">Search all 30+ studio tools…</string>
+</resources>

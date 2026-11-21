@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MageshPdfEditor" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/emerald_accent</item>
+        <item name="colorPrimaryVariant">@color/emerald_dark</item>
+        <item name="colorSecondary">@color/amber_signal</item>
+        <item name="android:colorBackground">@color/obsidian_bg</item>
+        <item name="colorSurface">@color/slate_surface</item>
+        <item name="android:statusBarColor">@color/obsidian_bg</item>
+        <item name="android:navigationBarColor">@color/slate_surface</item>
+    </style>
+</resources>
