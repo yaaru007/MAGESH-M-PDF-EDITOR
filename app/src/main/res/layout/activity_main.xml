@@ -124,7 +124,7 @@
             android:layout_height="match_parent"
             android:orientation="vertical">
 
-            <!-- Annotation Mode Strip -->
+            <!-- Annotation & Edit Mode Strip -->
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -150,6 +150,32 @@
                         android:textColor="@color/emerald_accent"
                         android:textSize="11sp"
                         app:strokeColor="@color/emerald_accent" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnModeEditText"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:layout_marginEnd="6dp"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:text="Edit Text"
+                        android:textColor="@color/emerald_accent"
+                        android:textSize="11sp"
+                        app:strokeColor="@color/graphite_border" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFindReplace"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:layout_marginEnd="6dp"
+                        android:minWidth="0dp"
+                        android:paddingHorizontal="10dp"
+                        android:text="Replace Word"
+                        android:textColor="@color/text_primary"
+                        android:textSize="11sp"
+                        app:strokeColor="@color/graphite_border" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnModeDraw"
@@ -321,7 +347,7 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- Bottom Quick-Action Studio Rail (7 Direct Actions) -->
+    <!-- Bottom Quick-Action Studio Rail -->
     <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -334,6 +360,29 @@
             android:orientation="horizontal"
             android:paddingHorizontal="10dp"
             android:paddingVertical="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickPdfToWord"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="6dp"
+                android:backgroundTint="@color/emerald_dark"
+                android:text="PDF → Word"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickWordToPdf"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="6dp"
+                android:backgroundTint="@color/graphite_card"
+                android:text="Word → PDF"
+                android:textColor="@color/emerald_accent"
+                android:textSize="11sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnQuickMerge"

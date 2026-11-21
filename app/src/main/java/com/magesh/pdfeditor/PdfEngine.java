@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.util.Xml;
 
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 import com.tom_roush.pdfbox.io.MemoryUsageSetting;
@@ -27,15 +28,23 @@ import com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDField;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
+import com.tom_roush.pdfbox.text.TextPosition;
 import com.tom_roush.pdfbox.util.Matrix;
+
+import org.xmlpull.v1.XmlPullParser;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public class PdfEngine {
 
@@ -149,7 +158,7 @@ public class PdfEngine {
                     cs.setFont(PDType1Font.HELVETICA_BOLD, 44);
                     cs.setNonStrokingColor(16, 185, 129);
                     cs.setTextMatrix(Matrix.getRotateInstance(Math.toRadians(45), rect.getWidth() * 0.2f, rect.getHeight() * 0.35f));
-                    cs.showText(watermarkText);
+                    cs.showText(sanitizeWinAnsi(watermarkText));
                     cs.endText();
                 }
             }
@@ -170,7 +179,7 @@ public class PdfEngine {
                     if (header != null && !header.isEmpty()) {
                         cs.beginText();
                         cs.newLineAtOffset(36, rect.getHeight() - 28);
-                        cs.showText(header);
+                        cs.showText(sanitizeWinAnsi(header));
                         cs.endText();
                     }
                     StringBuilder bottom = new StringBuilder();
@@ -182,7 +191,7 @@ public class PdfEngine {
                     if (bottom.length() > 0) {
                         cs.beginText();
                         cs.newLineAtOffset(36, 22);
-                        cs.showText(bottom.toString().trim());
+                        cs.showText(sanitizeWinAnsi(bottom.toString().trim()));
                         cs.endText();
                     }
                 }
@@ -191,20 +200,93 @@ public class PdfEngine {
         }
     }
 
-    public static void addTextOverlay(Context ctx, Uri uri, int pageIndex, String text, float xPct, float yPct, float fontSize, File outFile) throws Exception {
+    public static void addStyledTextAt(Context ctx, Uri uri, int pageIndex, String text, float xPct, float yPct,
+                                        float fontSize, int r, int g, int b, boolean whiteoutBg, File outFile) throws Exception {
         try (InputStream is = ctx.getContentResolver().openInputStream(uri);
              PDDocument doc = PDDocument.load(is)) {
             PDPage page = doc.getPage(pageIndex);
             PDRectangle rect = page.getMediaBox();
+            float x = rect.getWidth() * xPct;
+            float y = rect.getHeight() * (1f - yPct);
+            String clean = sanitizeWinAnsi(text);
+
             try (PDPageContentStream cs = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+                if (whiteoutBg) {
+                    float estWidth = Math.max(40f, clean.length() * fontSize * 0.56f);
+                    cs.setNonStrokingColor(255, 255, 255);
+                    cs.addRect(x - 3f, y - 4f, estWidth + 6f, fontSize + 6f);
+                    cs.fill();
+                }
                 cs.beginText();
                 cs.setFont(PDType1Font.HELVETICA_BOLD, fontSize);
-                cs.setNonStrokingColor(16, 185, 129);
-                cs.newLineAtOffset(rect.getWidth() * xPct, rect.getHeight() * (1f - yPct));
-                cs.showText(text);
+                cs.setNonStrokingColor(r, g, b);
+                cs.newLineAtOffset(x, y);
+                cs.showText(clean);
                 cs.endText();
             }
             doc.save(outFile);
+        }
+    }
+
+    public static int findAndReplaceWord(Context ctx, Uri uri, int pageIndex, String findWord, String replaceWord, File outFile) throws Exception {
+        try (InputStream is = ctx.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(is)) {
+            PDPage page = doc.getPage(pageIndex);
+            PDRectangle rect = page.getMediaBox();
+            float pageHeight = rect.getHeight();
+
+            List<float[]> boxes = new ArrayList<>();
+            PDFTextStripper stripper = new PDFTextStripper() {
+                @Override
+                protected void writeString(String text, List<TextPosition> textPositions) throws IOException {
+                    if (text != null && textPositions != null && !findWord.isEmpty()) {
+                        int idx = text.indexOf(findWord);
+                        while (idx >= 0 && idx + findWord.length() <= textPositions.size()) {
+                            TextPosition first = textPositions.get(idx);
+                            TextPosition last = textPositions.get(idx + findWord.length() - 1);
+                            float x = first.getXDirAdj();
+                            float w = (last.getXDirAdj() + last.getWidthDirAdj()) - x;
+                            float h = Math.max(8f, first.getHeightDir());
+                            float fs = Math.max(8f, first.getFontSizeInPt());
+                            float y = pageHeight - first.getYDirAdj();
+                            boxes.add(new float[]{x, y, w, h, fs});
+                            idx = text.indexOf(findWord, idx + findWord.length());
+                        }
+                    }
+                    super.writeString(text, textPositions);
+                }
+            };
+            stripper.setStartPage(pageIndex + 1);
+            stripper.setEndPage(pageIndex + 1);
+            stripper.getText(doc);
+
+            if (boxes.isEmpty()) {
+                return 0;
+            }
+
+            String cleanReplace = sanitizeWinAnsi(replaceWord);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+                for (float[] box : boxes) {
+                    float x = box[0];
+                    float y = box[1];
+                    float w = Math.max(box[2], cleanReplace.length() * box[4] * 0.52f);
+                    float h = box[3] * 1.35f;
+                    float fs = box[4];
+
+                    cs.setNonStrokingColor(255, 255, 255);
+                    cs.addRect(x - 1.5f, y - (h * 0.25f), w + 3f, h + 2f);
+                    cs.fill();
+
+                    cs.beginText();
+                    cs.setFont(PDType1Font.HELVETICA, fs);
+                    cs.setNonStrokingColor(0, 0, 0);
+                    cs.newLineAtOffset(x, y);
+                    cs.showText(cleanReplace);
+                    cs.endText();
+                }
+            }
+            doc.save(outFile);
+            return boxes.size();
         }
     }
 
@@ -218,6 +300,131 @@ public class PdfEngine {
                 cs.drawImage(pdImage, 0, 0, rect.getWidth(), rect.getHeight());
             }
             doc.save(outFile);
+        }
+    }
+
+    public static void pdfToWord(Context ctx, Uri uri, File outDocx) throws Exception {
+        List<String> pagesText = new ArrayList<>();
+        try (InputStream is = ctx.getContentResolver().openInputStream(uri);
+             PDDocument doc = PDDocument.load(is)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            int total = doc.getNumberOfPages();
+            for (int i = 1; i <= total; i++) {
+                stripper.setStartPage(i);
+                stripper.setEndPage(i);
+                String t = stripper.getText(doc);
+                pagesText.add(t == null ? "" : t);
+            }
+        }
+
+        StringBuilder docXml = new StringBuilder();
+        docXml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        docXml.append("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">");
+        docXml.append("<w:body>");
+
+        for (int p = 0; p < pagesText.size(); p++) {
+            String[] lines = pagesText.get(p).split("\\r?\\n");
+            for (String line : lines) {
+                docXml.append("<w:p><w:r><w:t xml:space=\"preserve\">")
+                        .append(escapeXml(line))
+                        .append("</w:t></w:r></w:p>");
+            }
+            if (p < pagesText.size() - 1) {
+                docXml.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
+            }
+        }
+        docXml.append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/></w:sectPr>");
+        docXml.append("</w:body></w:document>");
+
+        String contentTypes = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                + "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                + "</Types>";
+
+        String rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>"
+                + "</Relationships>";
+
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(outDocx))) {
+            writeZipEntry(zos, "[Content_Types].xml", contentTypes);
+            writeZipEntry(zos, "_rels/.rels", rels);
+            writeZipEntry(zos, "word/document.xml", docXml.toString());
+        }
+    }
+
+    public static void wordToPdf(Context ctx, Uri docxUri, File outPdf) throws Exception {
+        List<String> paragraphs = new ArrayList<>();
+        try (InputStream is = ctx.getContentResolver().openInputStream(docxUri);
+             ZipInputStream zis = new ZipInputStream(is)) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if ("word/document.xml".equals(entry.getName())) {
+                    XmlPullParser parser = Xml.newPullParser();
+                    parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+                    parser.setInput(zis, "UTF-8");
+                    StringBuilder currentPara = new StringBuilder();
+                    int eventType = parser.getEventType();
+                    while (eventType != XmlPullParser.END_DOCUMENT) {
+                        String name = parser.getName();
+                        if (eventType == XmlPullParser.START_TAG && "w:p".equals(name)) {
+                            currentPara.setLength(0);
+                        } else if (eventType == XmlPullParser.TEXT) {
+                            currentPara.append(parser.getText());
+                        } else if (eventType == XmlPullParser.END_TAG && "w:p".equals(name)) {
+                            paragraphs.add(currentPara.toString());
+                        }
+                        eventType = parser.next();
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (paragraphs.isEmpty()) {
+            paragraphs.add("(No readable paragraphs found in Word file.)");
+        }
+
+        try (PDDocument doc = new PDDocument()) {
+            float margin = 48f;
+            float fontSize = 11f;
+            float leading = 16f;
+            float pageW = PDRectangle.A4.getWidth();
+            float pageH = PDRectangle.A4.getHeight();
+            int maxCharsPerLine = 82;
+
+            PDPage page = new PDPage(PDRectangle.A4);
+            doc.addPage(page);
+            PDPageContentStream cs = new PDPageContentStream(doc, page);
+            cs.setFont(PDType1Font.HELVETICA, fontSize);
+            cs.setNonStrokingColor(0, 0, 0);
+            float y = pageH - margin;
+
+            for (String para : paragraphs) {
+                List<String> wrapped = wrapText(sanitizeWinAnsi(para), maxCharsPerLine);
+                if (wrapped.isEmpty()) wrapped.add("");
+                for (String line : wrapped) {
+                    if (y < margin + leading) {
+                        cs.close();
+                        page = new PDPage(PDRectangle.A4);
+                        doc.addPage(page);
+                        cs = new PDPageContentStream(doc, page);
+                        cs.setFont(PDType1Font.HELVETICA, fontSize);
+                        cs.setNonStrokingColor(0, 0, 0);
+                        y = pageH - margin;
+                    }
+                    cs.beginText();
+                    cs.newLineAtOffset(margin, y);
+                    cs.showText(line);
+                    cs.endText();
+                    y -= leading;
+                }
+                y -= 4f;
+            }
+            cs.close();
+            doc.save(outPdf);
         }
     }
 
@@ -376,5 +583,48 @@ public class PdfEngine {
         }
         if (diffs == 0) return "Both PDFs have identical extracted text.";
         return "Found " + diffs + " differing line(s):\n\n" + sb;
+    }
+
+    private static void writeZipEntry(ZipOutputStream zos, String name, String content) throws IOException {
+        zos.putNextEntry(new ZipEntry(name));
+        zos.write(content.getBytes(StandardCharsets.UTF_8));
+        zos.closeEntry();
+    }
+
+    private static String escapeXml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
+    }
+
+    private static String sanitizeWinAnsi(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (char c : s.toCharArray()) {
+            if (c >= 32 && c <= 255) sb.append(c);
+            else if (c == '\t') sb.append("    ");
+            else sb.append(' ');
+        }
+        return sb.toString();
+    }
+
+    private static List<String> wrapText(String text, int maxChars) {
+        List<String> lines = new ArrayList<>();
+        if (text == null || text.isEmpty()) return lines;
+        String[] words = text.split("\\s+");
+        StringBuilder cur = new StringBuilder();
+        for (String w : words) {
+            if (cur.length() + w.length() + 1 > maxChars && cur.length() > 0) {
+                lines.add(cur.toString());
+                cur.setLength(0);
+            }
+            if (cur.length() > 0) cur.append(' ');
+            cur.append(w);
+        }
+        if (cur.length() > 0) lines.add(cur.toString());
+        return lines;
     }
 }

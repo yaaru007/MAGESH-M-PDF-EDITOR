@@ -17,7 +17,11 @@ import java.util.List;
 public class AnnotationOverlayView extends View {
 
     public enum Mode {
-        VIEW, DRAW, HIGHLIGHT, REDACT
+        VIEW, EDIT_TEXT, DRAW, HIGHLIGHT, REDACT
+    }
+
+    public interface OnTapPointListener {
+        void onTap(float xPct, float yPct);
     }
 
     private static class Stroke {
@@ -39,6 +43,7 @@ public class AnnotationOverlayView extends View {
     }
 
     private Mode mode = Mode.VIEW;
+    private OnTapPointListener tapPointListener;
     private final List<Stroke> strokes = new ArrayList<>();
     private final List<Box> boxes = new ArrayList<>();
     private Path currentPath;
@@ -52,6 +57,10 @@ public class AnnotationOverlayView extends View {
 
     public AnnotationOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
+    }
+
+    public void setOnTapPointListener(OnTapPointListener listener) {
+        this.tapPointListener = listener;
     }
 
     public void setMode(Mode mode) {
@@ -122,6 +131,15 @@ public class AnnotationOverlayView extends View {
         if (mode == Mode.VIEW) return false;
         float x = event.getX();
         float y = event.getY();
+
+        if (mode == Mode.EDIT_TEXT) {
+            if (event.getAction() == MotionEvent.ACTION_UP && tapPointListener != null && getWidth() > 0 && getHeight() > 0) {
+                float xPct = Math.max(0.02f, Math.min(0.95f, x / getWidth()));
+                float yPct = Math.max(0.02f, Math.min(0.95f, y / getHeight()));
+                tapPointListener.onTap(xPct, yPct);
+            }
+            return true;
+        }
 
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:

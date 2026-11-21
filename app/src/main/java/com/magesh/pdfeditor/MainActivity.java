@@ -20,11 +20,13 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -76,6 +78,7 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> mergePdfsLauncher;
     private ActivityResultLauncher<Intent> imagesToPdfLauncher;
     private ActivityResultLauncher<Intent> comparePdfLauncher;
+    private ActivityResultLauncher<Intent> wordToPdfLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -141,6 +144,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        wordToPdfLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
+            if (res.getResultCode() == Activity.RESULT_OK && res.getData() != null && res.getData().getData() != null) {
+                Uri docxUri = res.getData().getData();
+                runTask("Converting Word (.docx) to PDF…", () -> {
+                    File out = createOutputFile("WordToPdf_", ".pdf");
+                    PdfEngine.wordToPdf(this, docxUri, out);
+                    return out;
+                });
+            }
+        });
+
         comparePdfLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), res -> {
             if (res.getResultCode() == Activity.RESULT_OK && res.getData() != null && res.getData().getData() != null) {
                 Uri secondUri = res.getData().getData();
@@ -172,11 +186,23 @@ public class MainActivity extends AppCompatActivity {
         btnTabTools.setOnClickListener(v -> switchTab(false));
 
         findViewById(R.id.btnModeView).setOnClickListener(v -> setOverlayMode(AnnotationOverlayView.Mode.VIEW));
+        findViewById(R.id.btnModeEditText).setOnClickListener(v -> {
+            if (!requirePdf()) return;
+            setOverlayMode(AnnotationOverlayView.Mode.EDIT_TEXT);
+            toast("Tap anywhere on the PDF page to add or overwrite text.");
+        });
+        findViewById(R.id.btnFindReplace).setOnClickListener(v -> promptFindReplace());
         findViewById(R.id.btnModeDraw).setOnClickListener(v -> setOverlayMode(AnnotationOverlayView.Mode.DRAW));
         findViewById(R.id.btnModeHighlight).setOnClickListener(v -> setOverlayMode(AnnotationOverlayView.Mode.HIGHLIGHT));
         findViewById(R.id.btnModeRedact).setOnClickListener(v -> setOverlayMode(AnnotationOverlayView.Mode.REDACT));
         findViewById(R.id.btnClearOverlay).setOnClickListener(v -> annotationOverlay.clear());
         findViewById(R.id.btnFlattenSave).setOnClickListener(v -> saveCanvasEdits());
+
+        annotationOverlay.setOnTapPointListener((xPct, yPct) -> {
+            if (requirePdf()) {
+                promptAddStyledTextAt(xPct, yPct);
+            }
+        });
 
         findViewById(R.id.btnPrevPage).setOnClickListener(v -> {
             if (currentPageIndex > 0) {
@@ -191,7 +217,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 7 Direct Quick Actions
+        // Quick-Action Studio Rail
+        findViewById(R.id.btnQuickPdfToWord).setOnClickListener(v -> runPdfToWord());
+        findViewById(R.id.btnQuickWordToPdf).setOnClickListener(v -> launchWordToPdf());
         findViewById(R.id.btnQuickMerge).setOnClickListener(v -> launchMerge());
         findViewById(R.id.btnQuickSplit).setOnClickListener(v -> promptSplit());
         findViewById(R.id.btnQuickRotate).setOnClickListener(v -> promptRotate());
@@ -216,9 +244,17 @@ public class MainActivity extends AppCompatActivity {
     private void setupToolHub() {
         List<ToolItem> tools = new ArrayList<>();
         // Editing
-        tools.add(new ToolItem("add_text", "Add Text Overlay", "Editing", "Stamp custom text onto the current PDF page."));
+        tools.add(new ToolItem("edit_text_tap", "Edit Text on Page (Tap)", "Editing", "Tap anywhere on the PDF page to add or overwrite text with size & color."));
+        tools.add(new ToolItem("find_replace", "Find & Replace Word", "Editing", "Search a word on the current PDF page and replace it in place."));
         tools.add(new ToolItem("watermark", "Add Watermark", "Editing", "Apply diagonal semi-transparent watermark across all pages."));
         tools.add(new ToolItem("headers_bates", "Headers, Footers & Bates", "Editing", "Add headers, footers, page numbers, or Bates numbering."));
+        // Conversion
+        tools.add(new ToolItem("pdf_to_word", "PDF → Word (.docx)", "Conversion", "Convert PDF pages into an editable Microsoft Word (.docx) file."));
+        tools.add(new ToolItem("word_to_pdf", "Word (.docx) → PDF", "Conversion", "Convert any .docx Word document into a multi-page PDF."));
+        tools.add(new ToolItem("img_to_pdf", "Images to PDF (JPG/PNG)", "Conversion", "Create a multi-page PDF from selected images."));
+        tools.add(new ToolItem("pdf_to_png", "Export Page as PNG", "Conversion", "Render the current PDF page as a high-res PNG image."));
+        tools.add(new ToolItem("extract_text", "Export to Text", "Conversion", "Extract embedded text from the entire PDF."));
+        tools.add(new ToolItem("export_html", "Export to HTML", "Conversion", "Convert extracted PDF text into a clean HTML document."));
         // Page Management
         tools.add(new ToolItem("merge", "Merge PDFs", "Page Management", "Combine multiple PDF documents into one file."));
         tools.add(new ToolItem("split", "Split PDF", "Page Management", "Extract a custom page range into a new PDF."));
@@ -232,11 +268,6 @@ public class MainActivity extends AppCompatActivity {
         tools.add(new ToolItem("fill_forms", "Fill PDF Forms", "Forms", "Edit existing AcroForm text fields and save."));
         tools.add(new ToolItem("create_form", "Create Fillable Field", "Forms", "Add a new interactive text field to the current page."));
         tools.add(new ToolItem("signature", "Add E-Signature", "Forms", "Draw your signature and stamp it onto the current page."));
-        // Conversion
-        tools.add(new ToolItem("img_to_pdf", "Images to PDF (JPG/PNG)", "Conversion", "Create a multi-page PDF from selected images."));
-        tools.add(new ToolItem("pdf_to_png", "Export Page as PNG", "Conversion", "Render the current PDF page as a high-res PNG image."));
-        tools.add(new ToolItem("extract_text", "Export to Text", "Conversion", "Extract embedded text from the entire PDF."));
-        tools.add(new ToolItem("export_html", "Export to HTML", "Conversion", "Convert extracted PDF text into a clean HTML document."));
         // OCR
         tools.add(new ToolItem("ocr", "OCR Scanned PDF", "OCR", "Recognize text from scanned pages using on-device ML Kit."));
         // Security
@@ -268,9 +299,17 @@ public class MainActivity extends AppCompatActivity {
 
     private void dispatchTool(String id) {
         switch (id) {
-            case "add_text": promptAddText(); break;
+            case "edit_text_tap":
+                if (requirePdf()) {
+                    setOverlayMode(AnnotationOverlayView.Mode.EDIT_TEXT);
+                    toast("Tap anywhere on the PDF page to add or overwrite text.");
+                }
+                break;
+            case "find_replace": promptFindReplace(); break;
             case "watermark": promptWatermark(); break;
             case "headers_bates": promptHeadersBates(); break;
+            case "pdf_to_word": runPdfToWord(); break;
+            case "word_to_pdf": launchWordToPdf(); break;
             case "merge": launchMerge(); break;
             case "split": promptSplit(); break;
             case "rotate": promptRotate(); break;
@@ -299,6 +338,13 @@ public class MainActivity extends AppCompatActivity {
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("application/pdf");
         launcher.launch(i);
+    }
+
+    private void launchWordToPdf() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        wordToPdfLauncher.launch(i);
     }
 
     private void launchMerge() {
@@ -368,6 +414,109 @@ public class MainActivity extends AppCompatActivity {
             PdfEngine.flattenOverlayBitmap(this, currentPdfUri, currentPageIndex, overlay, out);
             overlay.recycle();
             return out;
+        });
+    }
+
+    private void promptAddStyledTextAt(float xPct, float yPct) {
+        LinearLayout ll = dialogContainer();
+        EditText etText = inputField("Text to write on PDF", "");
+        EditText etSize = inputField("Font size (e.g. 14)", "14");
+        Spinner spColor = new Spinner(this);
+        String[] colors = {"Black", "Emerald", "Dark Blue", "Crimson"};
+        spColor.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, colors));
+        CheckBox cbWhiteout = new CheckBox(this);
+        cbWhiteout.setText("Cover/erase existing text behind");
+        cbWhiteout.setChecked(true);
+
+        ll.addView(etText);
+        ll.addView(etSize);
+        ll.addView(spColor);
+        ll.addView(cbWhiteout);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Edit Text on Page " + (currentPageIndex + 1))
+                .setView(ll)
+                .setPositiveButton("Apply", (d, w) -> {
+                    String txt = etText.getText().toString().trim();
+                    if (txt.isEmpty()) return;
+                    float size = parseIntSafe(etSize.getText().toString(), 14);
+                    int sel = spColor.getSelectedItemPosition();
+                    int r = 0, g = 0, b = 0;
+                    if (sel == 1) { r = 16; g = 185; b = 129; }
+                    else if (sel == 2) { r = 30; g = 64; b = 175; }
+                    else if (sel == 3) { r = 220; g = 38; b = 38; }
+                    int fr = r, fg = g, fb = b;
+                    runTask("Writing text to PDF…", () -> {
+                        File out = createOutputFile("TextEdited_", ".pdf");
+                        PdfEngine.addStyledTextAt(this, currentPdfUri, currentPageIndex, txt, xPct, yPct, size, fr, fg, fb, cbWhiteout.isChecked(), out);
+                        return out;
+                    });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void promptFindReplace() {
+        if (!requirePdf()) return;
+        LinearLayout ll = dialogContainer();
+        EditText etFind = inputField("Word to find on Page " + (currentPageIndex + 1), "");
+        EditText etReplace = inputField("Replace with", "");
+        ll.addView(etFind);
+        ll.addView(etReplace);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Find & Replace Word")
+                .setView(ll)
+                .setPositiveButton("Replace", (d, w) -> {
+                    String find = etFind.getText().toString();
+                    String rep = etReplace.getText().toString();
+                    if (find.isEmpty()) return;
+                    setBusy(true);
+                    executor.execute(() -> {
+                        try {
+                            File out = createOutputFile("Replaced_", ".pdf");
+                            int count = PdfEngine.findAndReplaceWord(this, currentPdfUri, currentPageIndex, find, rep, out);
+                            mainHandler.post(() -> {
+                                setBusy(false);
+                                if (count == 0) {
+                                    toast("Word not found on this page.");
+                                } else {
+                                    toast("Replaced " + count + " match(es).");
+                                    Uri outUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", out);
+                                    loadPdf(outUri);
+                                }
+                            });
+                        } catch (Exception e) {
+                            mainHandler.post(() -> {
+                                setBusy(false);
+                                toast("Replace error: " + e.getMessage());
+                            });
+                        }
+                    });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void runPdfToWord() {
+        if (!requirePdf()) return;
+        setBusy(true);
+        toast("Converting PDF to Word (.docx)…");
+        executor.execute(() -> {
+            try {
+                File out = createOutputFile("Converted_", ".docx");
+                PdfEngine.pdfToWord(this, currentPdfUri, out);
+                mainHandler.post(() -> {
+                    setBusy(false);
+                    toast("Saved Word file: " + out.getName());
+                    shareFile(out, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+                });
+            } catch (Exception e) {
+                mainHandler.post(() -> {
+                    setBusy(false);
+                    toast("PDF → Word failed: " + e.getMessage());
+                });
+            }
         });
     }
 
@@ -489,25 +638,6 @@ public class MainActivity extends AppCompatActivity {
                             cbNum.isChecked(), out);
                     return out;
                 }))
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void promptAddText() {
-        if (!requirePdf()) return;
-        EditText et = inputField("Text to stamp on page", "");
-        new AlertDialog.Builder(this)
-                .setTitle("Add Text Overlay")
-                .setView(wrapPadding(et))
-                .setPositiveButton("Stamp", (d, w) -> {
-                    String txt = et.getText().toString().trim();
-                    if (txt.isEmpty()) return;
-                    runTask("Adding text…", () -> {
-                        File out = createOutputFile("TextEdited_", ".pdf");
-                        PdfEngine.addTextOverlay(this, currentPdfUri, currentPageIndex, txt, 0.12f, 0.15f, 16f, out);
-                        return out;
-                    });
-                })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
